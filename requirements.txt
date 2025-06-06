@@ -1,0 +1,10 @@
+gradio
+httpx
+langgraph
+# If you decide to use SqliteSaver for LangGraph state persistence:
+# sqlite-utils
+fastapi
+uvicorn
+# Add any other specific libraries you might need, e.g., for advanced NLP if you enhance analyze_text_for_symptoms
+# beautifulsoup4 # if you were to scrape health.gov
+# lxml           # if you were to scrape health.gov
