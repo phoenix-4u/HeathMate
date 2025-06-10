@@ -77,12 +77,12 @@ HealthMate also acts as an MCP Server, exposing underlying tools for programmati
     *   **`tool_output` (on error):** A list containing a single dictionary with an `error` key and `details`.
     *   **Example `curl` Request:**
         ```bash
-        curl -X POST https://[your-space-name].hf.space/mcp \
-             -H "Content-Type: application/json" \
-             -d '{
-                   "tool_name": "search_pubmed",
-                   "tool_input": {"query": "Lisinopril hypertension", "max_results": 1}
-                 }'
+            {
+                "gradio": {
+                    "url": "http://127.0.0.1:7890/gradio_api/mcp/sse", 
+                    "transport": "sse",
+                }
+            }
         ```
 
     2.  **`get_fda_drug_info`**
@@ -92,19 +92,21 @@ HealthMate also acts as an MCP Server, exposing underlying tools for programmati
         *   **`tool_output` (on success):** A dictionary containing detailed drug information (e.g., `brand_name`, `generic_name`, `indications_and_usage`, `warnings_and_precautions`, `adverse_reactions`).
         *   **`tool_output` (on error or not found):** A dictionary with an `error` key and `details`.
         *   **Example `curl` Request:**
-            ```bash
-            curl -X POST https://[your-space-name].hf.space/mcp \
-                -H "Content-Type: application/json" \
-                -d '{
-                    "tool_name": "get_fda_drug_info",
-                    "tool_input": {"drug_name": "Lisinopril"}
-                    }'
+        ```bash
+            {
+                "gradio": {
+                    "url": "http://127.0.0.1:7890/gradio_api/mcp/sse", 
+                    "transport": "sse",
+                }
+            }
+        ```   
 
 **Example MCP Client Call (using `curl`):**
 ```bash
-curl -X POST https://[your-space-name].hf.space/mcp \
-     -H "Content-Type: application/json" \
-     -d '{
-           "tool_name": "search_pubmed",
-           "tool_input": {"query": "diabetes management", "max_results": 1}
-         }'
+    {
+        "gradio": {
+            "url": "http://127.0.0.1:7890/gradio_api/mcp/sse", 
+            "transport": "sse",
+        }
+    }
+```
