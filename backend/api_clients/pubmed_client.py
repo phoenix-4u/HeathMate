@@ -1,129 +1,170 @@
-# healthcare_mcp_app/backend/api_clients/pubmed_client.py
+# healthmate_app/backend/api_clients/pubmed_client.py
 import httpx
 import asyncio
 from typing import List, Dict, Any
+import xml.etree.ElementTree as ET
+
+# Import the configured logger
+from logger_config import logger
 
 PUBMED_API_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+TOOL_EMAIL = "phoenix.cocextreme@gmail.com" 
 
-async def fetch_pubmed_articles(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
+async def fetch_pubmed_articles_real(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
     """
-    Searches PubMed for articles related to the query and fetches their summaries.
-    (Simplified: only fetches IDs and simulates summary retrieval for brevity in this example)
-    A full implementation would involve esearch then efetch/esummary.
+    Searches PubMed for articles related to the query and fetches their summaries using real API calls.
     """
-    print(f"API_CLIENT: Searching PubMed for '{query}' (max: {max_results})")
-    search_params = {
-        "db": "pubmed",
-        "term": query,
-        "retmax": str(max_results),
-        "retmode": "json",
-        "sort": "relevance"
-    }
-    # In a real scenario, you'd first use esearch.fcgi to get IDs
-    # then efetch.fcgi or esummary.fcgi to get details.
-    # This is a conceptual placeholder for the actual API interaction.
-
-    # Simulate network latency and response
-    await asyncio.sleep(0.5)
-
-    # Simulated basic response structure based on typical keywords
+    logger.info(f"Attempting to fetch PubMed articles for query: '{query}', max_results: {max_results}")
     if not query:
+        logger.warning("Empty query provided to fetch_pubmed_articles. Returning empty list.")
         return []
 
+    article_ids = []
+    articles_data = []
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            # 1. Use esearch to get article IDs
+            esearch_params = {
+                "db": "pubmed",
+                "term": query,
+                "retmax": str(max_results),
+                "sort": "relevance",
+                "tool": "healthmate_app",
+                "email": TOOL_EMAIL
+            }
+            logger.debug(f"PubMed esearch request params: {esearch_params}")
+            response_search = await client.get(f"{PUBMED_API_URL}esearch.fcgi", params=esearch_params)
+            response_search.raise_for_status()
+
+            # Parse XML response from esearch
+            logger.debug(f"PubMed esearch response content (first 500 chars): {response_search.content[:500]}")
+            root_search = ET.fromstring(response_search.content)
+            id_list_element = root_search.find("IdList")
+            if id_list_element is not None:
+                for id_element in id_list_element.findall("Id"):
+                    if id_element.text:
+                        article_ids.append(id_element.text)
+            
+            if not article_ids:
+                logger.info(f"No PubMed article IDs found by esearch for query: '{query}'.")
+                return []
+            
+            logger.info(f"PubMed esearch found IDs: {article_ids} for query: '{query}'.")
+
+            # 2. Use efetch to get summaries for these IDs
+            ids_str = ",".join(article_ids)
+            efetch_params = {
+                "db": "pubmed",
+                "id": ids_str,
+                "retmode": "xml",
+                "rettype": "abstract",
+                "tool": "healthmate_app",
+                "email": TOOL_EMAIL
+            }
+            logger.debug(f"PubMed efetch request params: {efetch_params}")
+            response_fetch = await client.get(f"{PUBMED_API_URL}efetch.fcgi", params=efetch_params)
+            response_fetch.raise_for_status()
+            
+            logger.debug(f"PubMed efetch response content (first 500 chars): {response_fetch.content[:500]}")
+            root_fetch = ET.fromstring(response_fetch.content)
+            for pubmed_article_element in root_fetch.findall(".//PubmedArticle"):
+                article = {}
+                medline_citation = pubmed_article_element.find("MedlineCitation")
+                if medline_citation is not None:
+                    article["id"] = medline_citation.findtext("PMID")
+                    article_element = medline_citation.find("Article")
+                    if article_element is not None:
+                        article["title"] = article_element.findtext("ArticleTitle", "N/A")
+                        
+                        abstract_element = article_element.find("Abstract/AbstractText")
+                        if abstract_element is not None and abstract_element.text:
+                            article["summary"] = abstract_element.text
+                        else:
+                            abstract_texts = []
+                            for ab_text_el in article_element.findall("Abstract/AbstractText"):
+                                if ab_text_el.text:
+                                    label = ab_text_el.get("Label")
+                                    text_content = ab_text_el.text.strip()
+                                    # Ensure text_content is not just whitespace
+                                    if text_content:
+                                        if label:
+                                            abstract_texts.append(f"{label}: {text_content}")
+                                        else:
+                                            abstract_texts.append(text_content)
+                            if abstract_texts:
+                                article["summary"] = " ".join(abstract_texts)
+                            else:
+                                article["summary"] = "No abstract available or abstract is structured."
+                
+                if article.get("id") and article.get("title"):
+                    articles_data.append(article)
+                    logger.debug(f"Parsed PubMed article: ID={article.get('id')}, Title='{article.get('title', '')[:50]}...'")
+            
+            logger.info(f"Successfully fetched and parsed {len(articles_data)} PubMed articles for query: '{query}'.")
+            return articles_data
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching PubMed data for query '{query}': {e.response.status_code} - {e.response.text}", exc_info=True)
+            return [{"error": str(e), "details": f"Failed to fetch from PubMed (HTTP {e.response.status_code})."}]
+        except ET.ParseError as e:
+            logger.error(f"XML parsing error for PubMed query '{query}': {e}", exc_info=True)
+            return [{"error": str(e), "details": "Failed to parse PubMed XML response."}]
+        except httpx.RequestError as e:
+            logger.error(f"Request error for PubMed query '{query}': {e}", exc_info=True)
+            return [{"error": str(e), "details": "Network or request error connecting to PubMed."}]
+        except Exception as e:
+            logger.error(f"General error fetching PubMed data for query '{query}': {e}", exc_info=True)
+            return [{"error": str(e), "details": "An unexpected error occurred with PubMed API."}]
+
+# Renaming the simulated function for clarity, or it could be removed
+async def fetch_pubmed_articles_simulated(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
+    logger.info(f"SIMULATED: Fetching PubMed articles for query: '{query}', max_results: {max_results}")
+    # ... (rest of simulated logic)
+    await asyncio.sleep(0.1)
+    if not query: return []
     results = []
     if "covid" in query.lower():
         results.extend([
-            {"id": "pmid32000001", "title": "Understanding COVID-19 Pathogenesis", "summary": "A comprehensive review of how SARS-CoV-2 affects the human body and potential therapeutic targets."},
-            {"id": "pmid32000002", "title": "Vaccine Development for SARS-CoV-2", "summary": "Overview of different vaccine platforms and their efficacy in combating the COVID-19 pandemic."},
+            {"id": "sim_pmid32000001", "title": "SIM: Understanding COVID-19 Pathogenesis", "summary": "SIM: A comprehensive review of how SARS-CoV-2 affects the human body..."},
+            {"id": "sim_pmid32000002", "title": "SIM: Vaccine Development for SARS-CoV-2", "summary": "SIM: Overview of different vaccine platforms..."},
         ])
-    if "diabetes" in query.lower():
-        results.extend([
-            {"id": "pmid22000001", "title": "Advances in Type 2 Diabetes Management", "summary": "Recent breakthroughs in pharmacological and lifestyle interventions for type 2 diabetes."},
-        ])
-    if "influenza" in query.lower() or "flu" in query.lower():
-        results.extend([
-            {"id": "pmid12000001", "title": "Seasonal Influenza: Prevention and Control", "summary": "Strategies for preventing influenza outbreaks, including vaccination and public health measures."},
-        ])
-    
-    # If no specific keywords matched, provide some generic results if query is not empty
+    # ... (other simulated cases)
     if not results and query:
         results.append(
-            {"id": "pmid00000001", "title": f"General Medical Research on '{query.split()[0]}'", "summary": f"Exploratory research findings related to various aspects of {query.split()[0]}."}
+            {"id": "sim_pmid00000001", "title": f"SIM: General Medical Research on '{query.split()[0]}'", "summary": f"SIM: Exploratory research findings related to {query.split()[0]}."}
         )
-
     return results[:max_results]
 
-# Example of a more complete (but still conceptual) interaction
-# async def fetch_pubmed_articles_detailed(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
-#     async with httpx.AsyncClient() as client:
-#         try:
-#             # 1. Search for article IDs
-#             esearch_params = {
-#                 "db": "pubmed",
-#                 "term": query,
-#                 "retmax": str(max_results),
-#                 "retmode": "json",
-#                 "sort": "relevance",
-#                 "usehistory": "y" # To use history for efetch
-#             }
-#             print(f"API_CLIENT: PubMed esearch with term: {query}")
-#             response_search = await client.get(f"{PUBMED_API_URL}esearch.fcgi", params=esearch_params)
-#             response_search.raise_for_status()
-#             search_data = response_search.json()
-            
-#             id_list = search_data.get("esearchresult", {}).get("idlist")
-#             if not id_list:
-#                 return []
 
-#             # 2. Fetch summaries for these IDs
-#             ids_str = ",".join(id_list)
-#             esummary_params = {
-#                 "db": "pubmed",
-#                 "id": ids_str,
-#                 "retmode": "json",
-#                 # "api_key": "YOUR_PUBMED_API_KEY" # Optional, but good for higher rate limits
-#             }
-#             print(f"API_CLIENT: PubMed esummary for IDs: {ids_str}")
-#             response_summary = await client.get(f"{PUBMED_API_URL}esummary.fcgi", params=esummary_params)
-#             response_summary.raise_for_status()
-#             summary_data = response_summary.json()
-            
-#             articles = []
-#             results = summary_data.get("result", {})
-#             for article_id in results:
-#                 if article_id == "uids": continue # Skip the list of uids itself
-#                 article_info = results[article_id]
-#                 articles.append({
-#                     "id": article_info.get("uid"),
-#                     "title": article_info.get("title", "N/A"),
-#                     "summary": article_info.get("abstract", "No abstract available.") # Note: esummary might not always provide full abstract easily
-#                                                                                     # efetch is often better for full abstracts but more complex to parse.
-#                                                                                     # For simplicity, we might need to adjust what 'summary' means.
-#                                                                                     # Often, 'title' and 'authors' are more readily available from esummary.
-#                                                                                     # We will stick to a simplified structure for this example.
-#                     # It's common to get 'epubdate', 'authors', 'source' (journal)
-#                 })
-#             return articles
-#         except httpx.HTTPStatusError as e:
-#             print(f"API_CLIENT_ERROR: HTTP error fetching PubMed data: {e}")
-#             return [{"error": str(e), "details": "Failed to fetch from PubMed"}]
-#         except Exception as e:
-#             print(f"API_CLIENT_ERROR: General error fetching PubMed data: {e}")
-#             return [{"error": str(e), "details": "An unexpected error occurred"}]
+fetch_pubmed_articles = fetch_pubmed_articles_real
+
 
 if __name__ == '__main__':
     async def main():
-        # Test the function
-        # articles = await fetch_pubmed_articles_detailed("covid vaccine efficacy", 2)
-        articles = await fetch_pubmed_articles("covid vaccine efficacy", 2)
-        for art in articles:
-            print(f"Title: {art.get('title')}\nSummary: {art.get('summary', 'N/A')[:100]}...\n")
+        logger.info("--- Running PubMed Client Self-Test ---")
         
-        articles_empty = await fetch_pubmed_articles("", 1)
-        print(f"Empty query results: {articles_empty}")
+        test_query_1 = "covid vaccine efficacy"
+        logger.info(f"Test 1: Query '{test_query_1}'")
+        articles1 = await fetch_pubmed_articles(test_query_1, 2)
+        if articles1 and not any("error" in art for art in articles1):
+            for art_idx, art in enumerate(articles1):
+                logger.info(f"  Article {art_idx+1}: ID={art.get('id')}, Title='{art.get('title')}', Summary='{art.get('summary', 'N/A')[:70]}...'")
+        else:
+            logger.warning(f"  Test 1 Result for '{test_query_1}': {articles1}")
 
-        articles_generic = await fetch_pubmed_articles("rareconditionxyz", 1)
-        for art in articles_generic:
-            print(f"Title: {art.get('title')}\nSummary: {art.get('summary', 'N/A')[:100]}...\n")
+        test_query_2 = "nonexistentmedicaltermxyz123"
+        logger.info(f"Test 2: Query '{test_query_2}' (expecting no results or empty list)")
+        articles2 = await fetch_pubmed_articles(test_query_2, 1)
+        if not articles2: # handles empty list from "No article IDs found"
+            logger.info(f"  Test 2 for '{test_query_2}' yielded no results, as expected.")
+        elif articles2 and not any("error" in art for art in articles2) and not articles2[0].get("id"): # handles empty dicts if any
+            logger.info(f"  Test 2 for '{test_query_2}' yielded empty article data, as expected.")
+        elif articles2 and any("error" in art for art in articles2):
+            logger.warning(f"  Test 2 for '{test_query_2}' resulted in error: {articles2}")
+        else:
+            logger.warning(f"  Test 2 for '{test_query_2}' yielded unexpected results: {articles2}")
+        
+        logger.info("--- PubMed Client Self-Test Complete ---")
 
     asyncio.run(main())

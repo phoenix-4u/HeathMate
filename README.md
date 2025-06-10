@@ -68,18 +68,37 @@ HealthMate also acts as an MCP Server, exposing underlying tools for programmati
     }
     ```
 *   **Available Tools (via MCP):**
-    *   `search_pubmed`:
-        *   Input: `{"query": "string", "max_results": "int (optional, default 3)"}`
-        *   Output: List of article dictionaries or error.
-    *   `get_fda_drug_info`:
-        *   Input: `{"drug_name": "string"}`
-        *   Output: Drug information dictionary or error.
-    *   `get_health_gov_topic`: (Simulated Data)
-        *   Input: `{"topic_query": "string"}`
-        *   Output: Health topic dictionary or error.
-    *   `analyze_text_for_symptoms`: (Simplified Analysis)
-        *   Input: `{"text": "string"}`
-        *   Output: `{"symptoms_detected": ["symptom1", ...], "original_text_preview": "string"}` or error.
+    1.  **`search_pubmed`**
+    *   **Description:** Wraps a live API call to PubMed (NCBI E-utils) to search for medical research articles.
+    *   **`tool_input` Parameters:** 
+        *   `query` (string, required): The search term or question for PubMed.
+        *   `max_results` (integer, optional, default: 3): The maximum number of articles to return.
+    *   **`tool_output` (on success):** A list of dictionaries, where each dictionary represents an article and contains keys like `id`, `title`, and `summary`.
+    *   **`tool_output` (on error):** A list containing a single dictionary with an `error` key and `details`.
+    *   **Example `curl` Request:**
+        ```bash
+        curl -X POST https://[your-space-name].hf.space/mcp \
+             -H "Content-Type: application/json" \
+             -d '{
+                   "tool_name": "search_pubmed",
+                   "tool_input": {"query": "Lisinopril hypertension", "max_results": 1}
+                 }'
+        ```
+
+    2.  **`get_fda_drug_info`**
+        *   **Description:** Wraps a live API call to OpenFDA to fetch information about a specific drug.
+        *   **`tool_input` Parameters:**
+            *   `drug_name` (string, required): The brand or generic name of the drug.
+        *   **`tool_output` (on success):** A dictionary containing detailed drug information (e.g., `brand_name`, `generic_name`, `indications_and_usage`, `warnings_and_precautions`, `adverse_reactions`).
+        *   **`tool_output` (on error or not found):** A dictionary with an `error` key and `details`.
+        *   **Example `curl` Request:**
+            ```bash
+            curl -X POST https://[your-space-name].hf.space/mcp \
+                -H "Content-Type: application/json" \
+                -d '{
+                    "tool_name": "get_fda_drug_info",
+                    "tool_input": {"drug_name": "Lisinopril"}
+                    }'
 
 **Example MCP Client Call (using `curl`):**
 ```bash

@@ -1,115 +1,134 @@
-# healthcare_mcp_app/backend/api_clients/openfda_client.py
+# healthmate_app/backend/api_clients/openfda_client.py
 import httpx
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+import json # For JSONDecodeError
+
+# Import the configured logger
+from logger_config import logger
 
 OPENFDA_API_URL = "https://api.fda.gov/"
 
-async def fetch_fda_drug_info(drug_name: str) -> Optional[Dict[str, Any]]:
+async def fetch_fda_drug_info_real(drug_name: str) -> Optional[Dict[str, Any]]:
     """
-    Fetches drug information from OpenFDA.
-    This example focuses on drug label information.
+    Fetches drug information from OpenFDA using real API calls.
+    Focuses on drug label information.
     """
-    print(f"API_CLIENT: Getting FDA info for '{drug_name}'")
-    if not drug_name:
+    logger.info(f"Attempting to fetch OpenFDA drug info for: '{drug_name}'")
+    if not drug_name or not drug_name.strip():
+        logger.warning("Empty drug_name provided to fetch_fda_drug_info. Returning None.")
         return None
 
-    # Search for drug label information containing the brand or generic name
-    # Note: OpenFDA search can be tricky; exact matches are preferred.
-    # Using `openfda.brand_name` or `openfda.generic_name` is more precise.
-    # We'll try searching in a few common fields.
-    search_query = (
-        f'(openfda.brand_name:"{drug_name}" OR openfda.generic_name:"{drug_name}")'
-        f' OR (description:"{drug_name}" OR purpose:"{drug_name}")' # Broader search in text
-    )
+    search_query = f'(openfda.brand_name:"{drug_name}" OR openfda.generic_name:"{drug_name}")'
     params = {
         "search": search_query,
-        "limit": 1 # Get the most relevant result
+        "limit": 1
     }
 
-    # Simulate for now, as live API can be complex to get right demo data consistently
-    await asyncio.sleep(0.3)
-    drug_name_lower = drug_name.lower()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            logger.debug(f"OpenFDA request: URL={OPENFDA_API_URL}drug/label.json, Params={params}")
+            response = await client.get(f"{OPENFDA_API_URL}drug/label.json", params=params)
+            logger.debug(f"OpenFDA response status: {response.status_code}")
+            response.raise_for_status()
+            
+            data = response.json()
+            logger.debug(f"OpenFDA response data (first 500 chars): {str(data)[:500]}")
+            
+            if data.get("results") and len(data["results"]) > 0:
+                label_info = data["results"][0]
+                
+                def get_array_field(data_dict, field_name, default_val=["N/A"]) -> List[str]:
+                    # ... (helper function remains the same)
+                    field_data = data_dict.get(field_name)
+                    if isinstance(field_data, list) and all(isinstance(item, str) for item in field_data) and field_data:
+                        return field_data
+                    elif isinstance(field_data, str) and field_data:
+                        return [field_data]
+                    return default_val
 
-    if drug_name_lower == "metformin":
-        return {
-            "drug_name_queried": drug_name,
-            "brand_name": ["Glucophage (example)"],
-            "generic_name": ["Metformin Hydrochloride"],
-            "indications_and_usage": ["Metformin is a biguanide antihyperglycemic agent used for treating non-insulin-dependent diabetes mellitus (NIDDM). It improves glycemic control by decreasing hepatic glucose production, decreasing intestinal absorption of glucose and improving insulin sensitivity by increasing peripheral glucose uptake and utilization."],
-            "adverse_reactions": ["Common adverse reactions include diarrhea, nausea/vomiting, flatulence, asthenia, indigestion, abdominal discomfort, headache. Lactic acidosis is a rare but serious metabolic complication that can occur due to metformin accumulation."],
-            "warnings_and_precautions": ["Lactic acidosis: Postmarketing cases of metformin-associated lactic acidosis have resulted in death, hypothermia, hypotension, and resistant bradyarrhythmias. Risk factors include renal impairment, concomitant use of certain drugs (e.g., carbonic anhydrase inhibitors such as topiramate), age 65 years old or greater, having a radiological study with contrast, surgery and other procedures, hypoxic states (e.g., acute congestive heart failure), excessive alcohol intake, and hepatic impairment."],
-            "source": "OpenFDA (Simulated based on typical Metformin label)"
-        }
-    elif drug_name_lower == "ibuprofen":
-         return {
-            "drug_name_queried": drug_name,
-            "brand_name": ["Advil (example)", "Motrin (example)"],
-            "generic_name": ["Ibuprofen"],
-            "indications_and_usage": ["Ibuprofen is a nonsteroidal anti-inflammatory drug (NSAID) that is used to relieve pain from various conditions such as headache, dental pain, menstrual cramps, muscle aches, or arthritis. It is also used to reduce fever and to relieve minor aches and pain due to the common cold or flu."],
-            "adverse_reactions": ["Common side effects may include upset stomach, mild heartburn, nausea, vomiting; bloating, gas, diarrhea, constipation; dizziness, headache, nervousness; mild itching or rash; ringing in your ears."],
-            "warnings_and_precautions": ["Cardiovascular Thrombotic Events: NSAIDs cause an increased risk of serious cardiovascular thrombotic events, including myocardial infarction and stroke, which can be fatal. Gastrointestinal Bleeding, Ulceration, and Perforation: NSAIDs cause an increased risk of serious gastrointestinal (GI) adverse events including bleeding, ulceration, and perforation of the stomach or intestines, which can be fatal."],
-            "source": "OpenFDA (Simulated based on typical Ibuprofen label)"
-        }
-    
-    # Fallback for unmocked drugs
-    # async with httpx.AsyncClient() as client:
-    #     try:
-    #         print(f"API_CLIENT: Querying OpenFDA with: {search_query}")
-    #         response = await client.get(f"{OPENFDA_API_URL}drug/label.json", params=params)
-    #         response.raise_for_status() # Raise an exception for HTTP errors
-    #         data = response.json()
-            
-    #         if data.get("results") and len(data["results"]) > 0:
-    #             # Extract relevant fields from the first result
-    #             # The structure of OpenFDA label data can be complex and nested
-    #             # This is a simplified extraction
-    #             label_info = data["results"][0]
-    #             return {
-    #                 "drug_name_queried": drug_name,
-    #                 "brand_name": label_info.get("openfda", {}).get("brand_name", ["N/A"]),
-    #                 "generic_name": label_info.get("openfda", {}).get("generic_name", ["N/A"]),
-    #                 "indications_and_usage": label_info.get("indications_and_usage", ["N/A"])[0] if label_info.get("indications_and_usage") else "N/A",
-    #                 "adverse_reactions": label_info.get("adverse_reactions", ["N/A"])[0] if label_info.get("adverse_reactions") else "N/A",
-    #                 "warnings_and_precautions": label_info.get("warnings_and_precautions", ["N/A"])[0] if label_info.get("warnings_and_precautions") else "N/A",
-    #                 "source": "OpenFDA (Live API)"
-    #             }
-    #         else:
-    #             print(f"API_CLIENT: No results found on OpenFDA for '{drug_name}'.")
-    #             return None # Or an error dictionary
-    #     except httpx.HTTPStatusError as e:
-    #         print(f"API_CLIENT_ERROR: HTTP error fetching OpenFDA data for '{drug_name}': {e}")
-    #         return {"error": str(e), "details": f"Failed to fetch from OpenFDA for {drug_name}"}
-    #     except Exception as e:
-    #         print(f"API_CLIENT_ERROR: General error fetching OpenFDA data for '{drug_name}': {e}")
-    #         return {"error": str(e), "details": f"An unexpected error occurred with OpenFDA for {drug_name}"}
-            
-    print(f"API_CLIENT: No simulated data found for '{drug_name}' on OpenFDA.")
-    return None
+                openfda_section = label_info.get("openfda", {})
+                brand_names = openfda_section.get("brand_name", [])
+                generic_names = openfda_section.get("generic_name", [])
+                
+                indications = get_array_field(label_info, "indications_and_usage")
+                warnings_precautions = get_array_field(label_info, "warnings_and_precautions")
+                adverse_reactions = get_array_field(label_info, "adverse_reactions")
+                dosage_admin = get_array_field(label_info, "dosage_and_administration")
+
+                extracted_info = {
+                    "drug_name_queried": drug_name,
+                    "id": label_info.get("id", "N/A"),
+                    "set_id": label_info.get("set_id", "N/A"),
+                    "effective_time": label_info.get("effective_time", "N/A"),
+                    "brand_name": brand_names if isinstance(brand_names, list) else [str(brand_names)],
+                    "generic_name": generic_names if isinstance(generic_names, list) else [str(generic_names)],
+                    "manufacturer_name": openfda_section.get("manufacturer_name", ["N/A"]),
+                    "indications_and_usage": indications,
+                    "warnings_and_precautions": warnings_precautions,
+                    "adverse_reactions": adverse_reactions,
+                    "dosage_and_administration": dosage_admin,
+                    "source_api": "OpenFDA Drug Label API (Live)"
+                }
+                logger.info(f"Successfully fetched OpenFDA info for '{drug_name}'. ID: {extracted_info.get('id')}")
+                logger.debug(f"Extracted OpenFDA info for '{drug_name}': {extracted_info}")
+                return extracted_info
+            else:
+                logger.info(f"No results found on OpenFDA for '{drug_name}'. Search query: '{search_query}'. Response metadata: {data.get('meta')}")
+                return None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching OpenFDA data for '{drug_name}': {e.response.status_code} - {e.response.text}", exc_info=True)
+            return {"error": str(e), "details": f"Failed to fetch from OpenFDA (HTTP {e.response.status_code}). Query: {search_query}"}
+        except httpx.RequestError as e:
+            logger.error(f"Request error for OpenFDA for '{drug_name}': {e}", exc_info=True)
+            return {"error": str(e), "details": f"Network or request error connecting to OpenFDA. Query: {search_query}"}
+        except json.JSONDecodeError as e: # Corrected import for json
+            logger.error(f"JSON decoding error for OpenFDA response for '{drug_name}': {e.msg}", exc_info=True) # Use e.msg for JSONDecodeError
+            return {"error": str(e), "details": f"Failed to parse JSON from OpenFDA. Query: {search_query}"}
+        except Exception as e:
+            logger.error(f"General error fetching OpenFDA data for '{drug_name}': {e}", exc_info=True)
+            return {"error": str(e), "details": f"An unexpected error occurred with OpenFDA API. Query: {search_query}"}
+
+# async def fetch_fda_drug_info_simulated(drug_name: str) -> Optional[Dict[str, Any]]:
+#     logger.info(f"SIMULATED: Fetching OpenFDA drug info for: '{drug_name}'")
+#     # ... (rest of simulated logic)
+#     if not drug_name: return None
+#     await asyncio.sleep(0.1)
+#     drug_name_lower = drug_name.lower()
+#     # ... (simulated cases)
+#     if drug_name_lower == "metformin":
+#         return {
+#             "drug_name_queried": drug_name,
+#             # ...
+#             "source_api": "OpenFDA (Simulated)"
+#         }
+#     return None
+
+
+fetch_fda_drug_info = fetch_fda_drug_info_real
 
 if __name__ == '__main__':
     async def main():
-        metformin_info = await fetch_fda_drug_info("Metformin")
-        if metformin_info:
-            print(f"\n--- {metformin_info.get('drug_name_queried')} ---")
-            print(f"Indications: {str(metformin_info.get('indications_and_usage'))[:100]}...")
-            print(f"Warnings: {str(metformin_info.get('warnings_and_precautions'))[:100]}...")
+        logger.info("--- Running OpenFDA Client Self-Test ---")
+        test_drugs = ["Metformin", "Ibuprofen", "Lisinopril", "NonExistentDrugXYZ123"]
 
-        ibuprofen_info = await fetch_fda_drug_info("Ibuprofen")
-        if ibuprofen_info:
-            print(f"\n--- {ibuprofen_info.get('drug_name_queried')} ---")
-            print(f"Indications: {str(ibuprofen_info.get('indications_and_usage'))[:100]}...")
-
-        unknown_drug_info = await fetch_fda_drug_info("UnknownDrugXYZ")
-        if unknown_drug_info:
-            print(unknown_drug_info)
-        else:
-            print("\n--- UnknownDrugXYZ ---")
-            print("No information found as expected.")
+        for drug in test_drugs:
+            logger.info(f"Fetching info for: {drug}")
+            info = await fetch_fda_drug_info(drug)
+            if info and not info.get("error"):
+                logger.info(f"  Drug: {info.get('drug_name_queried')}, Brand: {info.get('brand_name')}, Source: {info.get('source_api')}")
+                logger.debug(f"  Full info for {drug}: {info}")
+            elif info and info.get("error"):
+                logger.warning(f"  Error fetching {drug}: {info.get('error')} - {info.get('details')}")
+            else:
+                logger.info(f"  No information found or API returned no results for {drug}.")
         
-        empty_query = await fetch_fda_drug_info("")
-        if not empty_query:
-            print("\n--- Empty Query ---")
-            print("No information for empty query as expected.")
+        logger.info("Fetching info for empty drug name:")
+        empty_info = await fetch_fda_drug_info("")
+        if empty_info is None:
+            logger.info("  Correctly returned None for empty drug name.")
+        else:
+            logger.warning(f"  Unexpected result for empty drug name: {empty_info}")
+        logger.info("--- OpenFDA Client Self-Test Complete ---")
 
     asyncio.run(main())

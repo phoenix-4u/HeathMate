@@ -1,151 +1,136 @@
 # healthmate_app/backend/tools/mcp_tools_registry.py
 import asyncio
+import os
+import sys
 from typing import List, Dict, Any, Callable, Coroutine
-
-# Import the actual API client functions
-from backend.api_clients.pubmed_client import fetch_pubmed_articles # fetch_pubmed_articles_detailed
+import gradio as gr
+# from ...logger_config import logger
+from backend.api_clients.pubmed_client import fetch_pubmed_articles
 from backend.api_clients.openfda_client import fetch_fda_drug_info
-from backend.api_clients.healthgov_client import fetch_health_gov_topic
+
+# Add the project root to Python path
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+from logger_config import logger
+
 
 # --- Tool Definitions ---
-# These functions are wrappers that will be exposed via the MCP server.
-# They call the underlying API client functions.
 
 async def tool_search_pubmed(query: str, max_results: int = 3) -> List[Dict[str, Any]]:
+    """Searches PubMed for medical research articles based on a query.
+
+    This tool interacts with the NCBI E-utils API (PubMed) to find relevant
+    articles. It's designed to take a natural language query or specific
+    search terms and return a list of article summaries.
+
+    Args:
+        query (str): The search term, question, or keywords to search for on PubMed.
+                     This should be a non-empty string.
+        max_results (int, optional): The maximum number of article summaries to return.
+                                     Defaults to 3. Must be a positive integer.
+                                     Invalid values will also default to 3.
+
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries, where each dictionary represents
+                              a found PubMed article. Each article dictionary typically
+                              contains keys such as 'id' (PMID), 'title', and 'summary'.
+                              If no articles are found, an empty list is returned.
+                              In case of an input validation error (e.g., empty query),
+                              it returns a list containing a single dictionary with an
+                              'error' key (e.g., [{"error": "Invalid input..."}]).
+                              If the underlying API call fails, the error structure from
+                              `fetch_pubmed_articles` (which also includes an 'error' key)
+                              will be propagated.
     """
-    MCP Tool: Searches PubMed for articles related to the query.
-    Input: {"query": "string", "max_results": "int (optional, default 3)"}
-    Output: List of article dictionaries (id, title, summary) or error dict.
-    """
-    print(f"MCP_TOOL: tool_search_pubmed called with query='{query}', max_results={max_results}")
-    if not isinstance(query, str) or not query.strip():
-        return [{"error": "Invalid input: 'query' must be a non-empty string."}]
-    if not isinstance(max_results, int) or max_results <= 0:
-        max_results = 3 # Default or correction
+    logger.info(f"MCP Tool 'tool_search_pubmed' called. Query='{query}', MaxResults={max_results}")
     
-    # Using the simplified fetch_pubmed_articles for this example
-    # For more detail, switch to fetch_pubmed_articles_detailed if fully implemented
-    return await fetch_pubmed_articles(query=query, max_results=max_results)
+    if not isinstance(query, str) or not query.strip():
+        logger.warning(f"Invalid input for 'tool_search_pubmed': 'query' must be a non-empty string. Received: '{query}'")
+        return [{"error": "Invalid input: 'query' must be a non-empty string."}]
+    
+    if not isinstance(max_results, int) or max_results <= 0:
+        logger.warning(f"Invalid 'max_results' for 'tool_search_pubmed': {max_results}. Defaulting to 3.")
+        max_results = 3
+    
+    # The API client (fetch_pubmed_articles) will perform its own detailed logging
+    result = await fetch_pubmed_articles(query=query, max_results=max_results)
+    
+    logger.debug(f"'tool_search_pubmed' result for query '{query}': {str(result)[:500]}...") # Log snippet of result
+    return result
 
 async def tool_get_fda_drug_info(drug_name: str) -> Dict[str, Any]:
+    """Fetches detailed information for a specific drug from OpenFDA.
+
+    This tool queries the OpenFDA API (drug label endpoint) to retrieve
+    information such as brand names, generic names, indications, warnings,
+    adverse reactions, and dosage for a given drug name.
+
+    Args:
+        drug_name (str): The brand or generic name of the drug to search for.
+                         This should be a non-empty string.
+
+    Returns:
+        Dict[str, Any]: A dictionary containing drug information if found.
+                        The structure includes keys like 'drug_name_queried',
+                        'brand_name' (list), 'generic_name' (list),
+                        'indications_and_usage' (list of strings),
+                        'warnings_and_precautions' (list of strings), etc.
+                        If the drug is not found or the API is unavailable,
+                        it returns a dictionary with an 'error' key and a
+                        'drug_name_queried' key (e.g., 
+                        {"drug_name_queried": "drug_xyz", "error": "No information found..."}).
+                        If there's an input validation error (e.g., empty drug_name),
+                        it returns {"error": "Invalid input..."}.
+                        If the underlying API call fails, the error structure from
+                        `fetch_fda_drug_info` (which also includes an 'error' key)
+                        will be propagated.
     """
-    MCP Tool: Fetches drug information from OpenFDA.
-    Input: {"drug_name": "string"}
-    Output: Drug information dictionary or error dict.
-    """
-    print(f"MCP_TOOL: tool_get_fda_drug_info called with drug_name='{drug_name}'")
+    logger.info(f"MCP Tool 'tool_get_fda_drug_info' called. DrugName='{drug_name}'")
+    
     if not isinstance(drug_name, str) or not drug_name.strip():
+        logger.warning(f"Invalid input for 'tool_get_fda_drug_info': 'drug_name' must be a non-empty string. Received: '{drug_name}'")
         return {"error": "Invalid input: 'drug_name' must be a non-empty string."}
         
+    # The API client (fetch_fda_drug_info) will perform its own detailed logging
     result = await fetch_fda_drug_info(drug_name=drug_name)
-    if result is None:
-        return {"drug_name_queried": drug_name, "error": "No information found or API unavailable."}
-    return result
-
-async def tool_get_health_gov_topic(topic_query: str) -> Dict[str, Any]:
-    """
-    MCP Tool: Retrieves health topic information (simulated from Health.gov).
-    Input: {"topic_query": "string"}
-    Output: Health topic dictionary or error dict.
-    """
-    print(f"MCP_TOOL: tool_get_health_gov_topic called with topic_query='{topic_query}'")
-    if not isinstance(topic_query, str) or not topic_query.strip():
-        return {"error": "Invalid input: 'topic_query' must be a non-empty string."}
-
-    result = await fetch_health_gov_topic(topic_query=topic_query)
-    if result is None:
-        return {"topic_queried": topic_query, "error": "Topic not found or information unavailable."}
-    return result
-
-async def tool_analyze_text_for_symptoms(text: str) -> Dict[str, Any]:
-    """
-    MCP Tool: (Simplified) Analyzes text to extract potential symptom keywords.
-    Input: {"text": "string"}
-    Output: {"symptoms_detected": ["symptom1", "symptom2"], "original_text_preview": "string"}
-    """
-    print(f"MCP_TOOL: tool_analyze_text_for_symptoms called with text='{text[:50]}...'")
-    if not isinstance(text, str): # Allow empty string, might indicate no symptoms
-        return {"error": "Invalid input: 'text' must be a string."}
-
-    # This would ideally be a more sophisticated NLP model.
-    # For now, simple keyword spotting.
-    await asyncio.sleep(0.05) # Simulate processing time
-    symptoms_found = []
-    text_lower = text.lower()
-
-    # Define a simple list of keywords. In a real system, this would be more extensive.
-    symptom_keywords = [
-        "fever", "cough", "sore throat", "headache", "fatigue", "rash", "nausea",
-        "vomiting", "diarrhea", "shortness of breath", "body ache", "chills",
-        "congestion", "runny nose", "loss of taste", "loss of smell", "dizziness",
-        "unusual bleeding", "swelling"
-    ]
-
-    for keyword in symptom_keywords:
-        if keyword in text_lower:
-            symptoms_found.append(keyword)
     
-    # Generic trigger if specific keywords aren't found but text seems like a report
-    if not symptoms_found and ("report" in text_lower or "outbreak" in text_lower or "unusual illness" in text_lower):
-        symptoms_found.append("general concern signal (non-specific)")
-        
-    return {
-        "symptoms_detected": list(set(symptoms_found)), # Use set to remove duplicates
-        "original_text_preview": text[:100] + "..." if len(text) > 100 else text
-    }
+    if result is None: # API client returns None if drug not found and no other error
+        logger.info(f"'tool_get_fda_drug_info' found no information for drug '{drug_name}'.")
+        return {"drug_name_queried": drug_name, "error": "No information found or API unavailable."}
+    elif result.get("error"): # API client might return a dict with an error key for other issues
+        logger.warning(f"'tool_get_fda_drug_info' encountered an error for drug '{drug_name}': {result.get('details') or result.get('error')}")
+        # Pass through the error dictionary from the client
+    
+    logger.debug(f"'tool_get_fda_drug_info' result for drug '{drug_name}': {str(result)[:500]}...") # Log snippet of result
+    return result
 
 # --- MCP Tools Registry ---
-# A dictionary to map tool names to their callable functions.
-# The MCP server logic will use this to dispatch requests.
-# Values can be `Callable[..., Coroutine[Any, Any, Dict[str, Any]]]` for async functions
-# or `Callable[..., Dict[str, Any]]]` for sync functions.
-
 ToolsRegistry = Dict[str, Callable[..., Coroutine[Any, Any, Dict[str, Any]]]]
 
 MCP_TOOLS_REGISTRY: ToolsRegistry = {
     "search_pubmed": tool_search_pubmed,
     "get_fda_drug_info": tool_get_fda_drug_info,
-    "get_health_gov_topic": tool_get_health_gov_topic,
-    "analyze_text_for_symptoms": tool_analyze_text_for_symptoms,
-    # Add more tools here as they are developed
 }
+
+registry = gr.TabbedInterface(
+    [
+        gr.Interface(tool_search_pubmed, [gr.Textbox(), gr.Textbox()], gr.Textbox(), api_name="tool_search_pubmed"),
+        gr.Interface(tool_get_fda_drug_info, gr.Textbox(), gr.Textbox(), api_name="tool_get_fda_drug_info"),
+    ],
+    [
+        "search pubmed",
+        "get fda drug info",
+    ]
+)
 
 if __name__ == '__main__':
     async def main():
-        print("--- Testing MCP Tool Wrappers ---")
+        logger.info("--- Running MCP Tools Registry Self-Test (Detailed Docstrings Added) ---")
 
-        # Test PubMed tool
-        pubmed_res = await tool_search_pubmed(query="influenza treatment", max_results=1)
-        print(f"\nPubMed Result: {pubmed_res}")
-        pubmed_err = await tool_search_pubmed(query="", max_results=1)
-        print(f"PubMed Error (empty query): {pubmed_err}")
-
-
-        # Test FDA tool
-        fda_res = await tool_get_fda_drug_info(drug_name="Metformin")
-        print(f"\nFDA Result (Metformin): {fda_res['drug_name_queried'] if fda_res and 'drug_name_queried' in fda_res else 'Error or not found'}")
-        # print(fda_res)
-        fda_err = await tool_get_fda_drug_info(drug_name="  ")
-        print(f"FDA Error (empty drug_name): {fda_err}")
-        fda_unknown = await tool_get_fda_drug_info(drug_name="UnknownDrugXYZ999")
-        print(f"FDA Result (UnknownDrug): {fda_unknown}")
-
-
-        # Test Health.gov tool
-        hg_res = await tool_get_health_gov_topic(topic_query="healthy diet")
-        print(f"\nHealth.gov Result (Healthy Diet): {hg_res.get('topic') if hg_res else 'Error or not found'}")
-        # print(hg_res)
-        hg_err = await tool_get_health_gov_topic(topic_query=None) # type: ignore
-        print(f"Health.gov Error (None query): {hg_err}")
-
-
-        # Test Symptom Analyzer tool
-        symptom_res = await tool_analyze_text_for_symptoms(text="Patient reports high fever, persistent cough, and severe headache for three days.")
-        print(f"\nSymptom Analysis Result: {symptom_res.get('symptoms_detected')}")
-        # print(symptom_res)
-        symptom_res_general = await tool_analyze_text_for_symptoms(text="There's an unusual illness reported in the northern district.")
-        print(f"Symptom Analysis (General): {symptom_res_general.get('symptoms_detected')}")
-        symptom_err = await tool_analyze_text_for_symptoms(text=123) # type: ignore
-        print(f"Symptom Analysis Error (bad input): {symptom_err}")
+        registry.launch(mcp_server=True,share=False, debug=True,prevent_thread_lock=True,server_port=7890)
+        
+        logger.info("--- MCP Tools Registry Self-Test Complete ---")
 
     asyncio.run(main())

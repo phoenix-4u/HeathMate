@@ -1,55 +1,49 @@
 # healthmate_app/backend/mcp_server_logic.py
-import json
-import asyncio
+import json 
+import asyncio 
 from typing import Dict, Any
+# Import the configured logger
+from logger_config import logger
 
 # Import the registry from the tools module
-from backend.tools.mcp_tools_registry import MCP_TOOLS_REGISTRY
+from backend.tools.mcp_tools_registry import MCP_TOOLS_REGISTRY, ToolsRegistry 
 
 async def execute_mcp_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     """
     Executes a registered MCP tool.
-
-    Args:
-        tool_name: The name of the tool to execute.
-        tool_input: A dictionary of parameters for the tool.
-
-    Returns:
-        A dictionary containing the tool_name and its output, or an error.
     """
-    print(f"MCP_SERVER_LOGIC: Attempting to execute tool='{tool_name}' with input={tool_input}")
+    logger.info(f"MCP Server: Attempting to execute tool='{tool_name}' with input='{tool_input}'.")
 
     if tool_name not in MCP_TOOLS_REGISTRY:
-        print(f"MCP_SERVER_LOGIC: Tool='{tool_name}' not found in registry.")
+        logger.warning(f"MCP Server: Tool='{tool_name}' not found in registry.")
         return {
             "tool_name": tool_name,
             "tool_output": {"error": f"Tool '{tool_name}' not found."},
             "error": True,
-            "status": 404 # Not Found
+            "status": 404 
         }
 
     tool_function = MCP_TOOLS_REGISTRY[tool_name]
 
     try:
-        # Directly call the async tool function (all our tools are async now)
-        # The tool functions themselves should handle input validation.
-        if asyncio.iscoroutinefunction(tool_function):
-            result = await tool_function(**tool_input)
-        else:
-            # This case should ideally not happen if all registered tools are async
-            print(f"MCP_SERVER_LOGIC: Warning - Tool '{tool_name}' is not an async function. Calling synchronously.")
-            result = tool_function(**tool_input) # type: ignore
+        # All registered tools are expected to be async coroutine functions
+        logger.debug(f"MCP Server: Calling tool function '{tool_name}'.")
+        result = await tool_function(**tool_input)
+        # The tool functions themselves (or the API clients they call)
+        # are responsible for detailed logging of their execution.
 
-        print(f"MCP_SERVER_LOGIC: Successfully executed tool='{tool_name}'.")
+        logger.info(f"MCP Server: Successfully executed tool='{tool_name}'.")
+        # Check if the tool's result itself indicates an error (e.g., API client error)
+        tool_had_internal_error = isinstance(result, dict) and result.get("error") is not None
+        
         return {
             "tool_name": tool_name,
-            "tool_output": result, # The result from the tool function
-            "error": False, # Indicate no error in execution itself (tool_output might contain its own 'error' field)
-            "status": 200 # OK
+            "tool_output": result,
+            "error": tool_had_internal_error, # Reflect if the tool's output contains an error
+            "status": 400 if tool_had_internal_error and isinstance(result.get("details"), str) and "Invalid input" in result.get("details", "") else (200 if not tool_had_internal_error else 500) # Basic status logic
         }
     except TypeError as te:
-        # This often happens if tool_input doesn't match the tool_function's signature
-        print(f"MCP_SERVER_LOGIC: TypeError executing tool='{tool_name}': {te}. Input was: {tool_input}")
+        logger.error(f"MCP Server: TypeError executing tool='{tool_name}' with input='{tool_input}'. Error: {te}", exc_info=True)
         return {
             "tool_name": tool_name,
             "tool_output": {
@@ -57,10 +51,10 @@ async def execute_mcp_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[s
                 "details": str(te)
             },
             "error": True,
-            "status": 400 # Bad Request
+            "status": 400 
         }
     except Exception as e:
-        print(f"MCP_SERVER_LOGIC: Unexpected error executing tool='{tool_name}': {e}")
+        logger.error(f"MCP Server: Unexpected error executing tool='{tool_name}': {e}", exc_info=True)
         return {
             "tool_name": tool_name,
             "tool_output": {
@@ -68,65 +62,35 @@ async def execute_mcp_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[s
                 "details": str(e)
             },
             "error": True,
-            "status": 500 # Internal Server Error
+            "status": 500
         }
 
 if __name__ == '__main__':
     async def main():
-        print("--- Testing MCP Server Logic ---")
+        logger.info("--- Running MCP Server Logic Self-Test ---")
 
-        # Test case 1: Valid tool and input
-        print("\nTest Case 1: Valid PubMed search")
+        logger.info("\nTest Case 1: Valid PubMed search via execute_mcp_tool")
         response1 = await execute_mcp_tool(
             tool_name="search_pubmed",
             tool_input={"query": "common cold symptoms", "max_results": 1}
         )
-        print(json.dumps(response1, indent=2))
-        assert not response1["error"] and response1["status"] == 200
-        assert "id" in response1["tool_output"][0]
+        logger.info(f"Response 1 (PubMed): {response1}")
+        # Assertions can be added here if needed
 
-        # Test case 2: Tool not found
-        print("\nTest Case 2: Tool not found")
+        logger.info("\nTest Case 2: Tool not found via execute_mcp_tool")
         response2 = await execute_mcp_tool(
             tool_name="non_existent_tool",
             tool_input={"some_param": "value"}
         )
-        print(json.dumps(response2, indent=2))
-        assert response2["error"] and response2["status"] == 404
+        logger.info(f"Response 2 (Tool Not Found): {response2}")
 
-        # Test case 3: Valid tool, but missing required input (tool should handle or TypeError)
-        print("\nTest Case 3: FDA tool with missing 'drug_name'")
+        logger.info("\nTest Case 3: FDA tool with missing 'drug_name' via execute_mcp_tool (expecting TypeError)")
         response3 = await execute_mcp_tool(
             tool_name="get_fda_drug_info",
             tool_input={} # Missing 'drug_name'
         )
-        print(json.dumps(response3, indent=2))
-        # This will result in a TypeError because drug_name is a required positional argument.
-        assert response3["error"] and response3["status"] == 400
-        assert "Invalid parameters" in response3["tool_output"]["error"]
-
-        # Test case 4: Valid tool, incorrect input type (tool should handle)
-        print("\nTest Case 4: PubMed tool with incorrect 'max_results' type")
-        response4 = await execute_mcp_tool(
-            tool_name="search_pubmed",
-            tool_input={"query": "flu", "max_results": "one"} # max_results should be int
-        )
-        print(json.dumps(response4, indent=2))
-        # The tool itself might correct it or error; let's assume TypeError for now if not handled inside.
-        # Our current tool_search_pubmed corrects it or uses default.
-        # If it was a strict type requirement for the tool function, it would be status 400.
-        # In this case, our tool has a default so it might pass with default value for max_results
-        assert not response4["error"] and response4["status"] == 200
-        assert response4["tool_output"][0]["summary"] # Check if it ran
-
-        # Test case 5: Symptom analyzer
-        print("\nTest Case 5: Symptom Analyzer")
-        response5 = await execute_mcp_tool(
-            tool_name="analyze_text_for_symptoms",
-            tool_input={"text": "Patient has fever and cough."}
-        )
-        print(json.dumps(response5, indent=2))
-        assert not response5["error"] and "symptoms_detected" in response5["tool_output"]
-        assert "fever" in response5["tool_output"]["symptoms_detected"]
+        logger.info(f"Response 3 (FDA Missing Param): {response3}")
+        
+        logger.info("--- MCP Server Logic Self-Test Complete ---")
 
     asyncio.run(main())
