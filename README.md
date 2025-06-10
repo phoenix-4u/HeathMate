@@ -15,6 +15,7 @@ tags:
 - langgraph
 - gradio
 - fastapi
+- agent-demo-track
 ---
 
 # ⚕️ HealthMate: AI Health Information Assistant & MCP Server
